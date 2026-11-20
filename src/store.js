@@ -29,7 +29,7 @@ export const S = {
   cardsByNote: new Map(), mediaNames: new Set(), settings: null, kv: {},
 };
 
-export const DEFAULT_SETTINGS = { retention: 0.9, dayStart: 4, newPerDay: 20, revPerDay: 200, theme: 'auto', ttsRate: 1, showIntervals: true };
+export const DEFAULT_SETTINGS = { retention: 0.9, dayStart: 4, newPerDay: 20, revPerDay: 200, theme: 'auto', ttsRate: 1, showIntervals: true, offline: false };
 
 export async function load() {
   const d = await open();

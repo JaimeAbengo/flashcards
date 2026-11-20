@@ -3,7 +3,7 @@ import { S, saveSettings, wipeAll, load } from '../store.js';
 import { exportBackup, exportApkg } from '../exporter.js';
 import { h, toast, confirmBox, downloadFile, plural } from '../util.js';
 import { startImport } from './decks.js';
-import { applyTheme, refreshAll, VERSION } from './app.js';
+import { applyTheme, refreshAll, VERSION, syncOfflineFlag, appCached } from './app.js';
 
 export async function renderSettings() {
   const t = document.getElementById('tab-settings');
@@ -27,6 +27,11 @@ export async function renderSettings() {
       h('div.row', h('div.grow', 'Show next interval on buttons'), tog('showIntervals')),
       h('div.row', h('div.grow', 'Read aloud speed'), sel('ttsRate', [[0.7, 'Slow'], [0.85, 'Relaxed'], [1, 'Normal'], [1.2, 'Fast']]))),
     h('p.muted.small', { style: { margin: '8px 4px' } }, 'Daily limits here are defaults. Each deck can override them in its options.'),
+    h('h2.section', 'Privacy'),
+    h('div.group',
+      h('div.row', h('div.grow', h('div', 'Offline mode'), h('small', 'The app never connects to the internet: no update checks, links in cards are blocked, and only on-device voices read aloud.')),
+        h('input.toggle#offlineToggle', { type: 'checkbox', checked: !!s.offline, on: { change: toggleOffline } }))),
+    h('p.muted.small', { style: { margin: '8px 4px' } }, s.offline ? 'Offline mode is on. Turn it off now and then to receive app updates.' : 'Everything you study already stays on this phone. Offline mode also stops the app from checking for updates.'),
     h('h2.section', 'Appearance'),
     h('div.group', h('div.row', h('div.grow', 'Theme'), sel('theme', [['auto', 'Match phone'], ['light', 'Light'], ['dark', 'Dark']], applyTheme))),
     h('h2.section', 'Your data'),
@@ -38,9 +43,20 @@ export async function renderSettings() {
       h('div.row', h('div.grow', 'Storage used'), storage),
       h('div.row', h('button.btn.danger.wide', { on: { click: reset } }, 'Delete everything'))),
     h('p.credit', 'Made by ', h('b', 'Jaime Abengoechea')),
-    h('p.about', 'Scheduling by FSRS (open-spaced-repetition). Imports Anki .apkg and Quizlet/text exports.', h('br'), `Version ${VERSION}`),
+    h('p.about', 'Scheduling by FSRS (open-spaced-repetition). Imports Anki .apkg and Quizlet/text exports.', h('br'), `Version ${VERSION}${s.offline ? ' · offline mode' : ''}`),
   );
   try { const e = await navigator.storage.estimate(); storage.textContent = `${(e.usage / 1e6).toFixed(1)} MB · ${plural(S.cards.size, 'card')}, ${plural(S.mediaNames.size, 'media file')}`; } catch { storage.textContent = plural(S.cards.size, 'card'); }
+}
+
+async function toggleOffline(e) {
+  const on = e.target.checked;
+  if (on && 'serviceWorker' in navigator && !(await appCached())) {
+    e.target.checked = false;
+    return toast("The app isn't fully saved on this phone yet. Open it once with internet, then try again.", 4000);
+  }
+  S.settings.offline = on; await saveSettings(); await syncOfflineFlag();
+  toast(on ? 'Offline mode on: the app will not connect to the internet' : 'Offline mode off');
+  renderSettings();
 }
 
 async function backup() {

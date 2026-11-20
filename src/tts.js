@@ -1,5 +1,6 @@
 // Text-to-speech using the phone's built-in voices.
 import { S } from './store.js';
+import { toast } from './util.js';
 
 let voices = [];
 const loadVoices = () => { try { voices = speechSynthesis.getVoices(); } catch { voices = []; } };
@@ -23,12 +24,14 @@ export function speak(text, lang) {
   if (!ttsAvailable() || !text) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  if (lang) {
-    u.lang = lang;
-    const l = lang.toLowerCase();
-    const v = voices.find(v => v.lang.toLowerCase().replace('_', '-') === l && v.localService) || voices.find(v => v.lang.toLowerCase().replace('_', '-') === l) || voices.find(v => v.lang.toLowerCase().startsWith(l.split('-')[0]));
-    if (v) u.voice = v;
-  }
+  // some browsers have online voices; in offline mode only use voices that run on the device
+  const pool = S.settings.offline ? voices.filter(v => v.localService) : voices;
+  if (S.settings.offline && voices.length && !pool.length) { toast('No on-device voice available in offline mode'); return; }
+  const l = (lang || navigator.language || 'en').toLowerCase();
+  const v = pool.find(v => v.lang.toLowerCase().replace('_', '-') === l && v.localService) || pool.find(v => v.lang.toLowerCase().replace('_', '-') === l) || pool.find(v => v.lang.toLowerCase().startsWith(l.split('-')[0]));
+  if (lang) u.lang = lang;
+  if (v) u.voice = v;
+  else if (S.settings.offline && voices.length) { toast('No on-device voice for this language'); return; }
   u.rate = S.settings.ttsRate || 1;
   speechSynthesis.speak(u);
 }

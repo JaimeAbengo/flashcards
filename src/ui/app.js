@@ -39,6 +39,24 @@ export function applyTheme() {
 }
 mq.addEventListener?.('change', applyTheme);
 
+// tell the service worker (via Cache Storage, which it can read even after restarting)
+export async function syncOfflineFlag() {
+  try {
+    const c = await caches.open('flags');
+    if (S.settings.offline) await c.put('offline', new Response('1')); else await c.delete('offline');
+  } catch { }
+}
+// are all app files saved on the phone? (needed before going fully offline)
+export async function appCached() {
+  try {
+    const keys = await caches.keys(); const shell = keys.find(k => k.startsWith('shell-'));
+    if (!shell) return false;
+    const c = await caches.open(shell);
+    for (const f of ['index.html', 'app.js', 'style.css', 'vendor/sql-wasm.wasm']) if (!(await c.match(f))) return false;
+    return true;
+  } catch { return false; }
+}
+
 async function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   try {
@@ -48,7 +66,7 @@ async function registerSW() {
     reg.addEventListener('updatefound', () => { const w = reg.installing; w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) prompt(w); }); });
     let reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
-    setInterval(() => reg.update().catch(() => { }), 3600e3);
+    setInterval(() => { if (!S.settings.offline) reg.update().catch(() => { }); }, 3600e3);
   } catch { }
 }
 
@@ -57,6 +75,7 @@ export async function boot() {
   window.addEventListener('unhandledrejection', e => { console.error(e.reason); toast('Something went wrong: ' + (e.reason?.message || e.reason)); });
   await load();
   applyTheme();
+  syncOfflineFlag();
   $('#tabbar').replaceChildren(...TABS.map(t => h('button', { 'data-tab': t.id, on: { click: () => showTab(t.id) } }, icon(t.icon), t.label)));
   showTab('decks');
   // refresh counts when coming back to the app (e.g. the next morning)

@@ -1,6 +1,8 @@
 // Renders card HTML in an isolated shadow root so deck styles can't break the app.
 import { cssWithMedia, hydrate, soundify, playSound, soundsIn, deferImgs } from './templates.js';
 import { speak } from './tts.js';
+import { S } from './store.js';
+import { toast } from './util.js';
 
 export const isDark = () => document.body.classList.contains('theme-dark') || (document.body.classList.contains('theme-auto') && document.body.classList.contains('sys-dark'));
 
@@ -35,6 +37,11 @@ export async function mountCard(host, html, css, { onEnter, ttsLang } = {}) {
   root.innerHTML = `<style>${BASE}${await cssWithMedia(css || '')}${dark ? DARK : ''}</style><div class="card${dark ? ' nightMode night_mode' : ''}">${soundify(clean)}</div>`;
   await hydrate(root);
   root.querySelectorAll('.snd-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); playSound(b.dataset.snd); }));
+  root.querySelectorAll('a[href]').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (S.settings.offline) return toast('Offline mode is on: links are blocked');
+    if (/^https?:/i.test(a.href)) window.open(a.href, '_blank', 'noopener');
+  }));
   root.querySelectorAll('.tts-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); speak(b.dataset.text, b.dataset.lang || ttsLang); }));
   let input = null;
   const slot = root.querySelector('.typeans-slot');
