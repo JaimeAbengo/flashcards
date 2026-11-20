@@ -25,6 +25,8 @@ input, select, textarea { font: inherit; color: var(--text); }
 .tab-view { display: none; flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: calc(var(--safe-t) + 8px) 16px 28px; }
 .tab-view.active { display: block; }
 .tab-view > * { flex-shrink: 0; }
+.tab-view { -webkit-user-select: none; user-select: none; }
+.tab-view input, .tab-view textarea { -webkit-user-select: text; user-select: text; }
 .tabbar { display: flex; border-top: 1px solid var(--line); background: var(--bg2); padding-bottom: var(--safe-b); flex: none; }
 .tabbar button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0 6px; color: var(--muted); font-size: 11px; font-weight: 600; }
 .tabbar button.active { color: var(--accent); }
@@ -87,6 +89,11 @@ select.input, .input { width: 100%; padding: 11px 12px; border-radius: 10px; bor
 .deck-row { display: flex; align-items: center; gap: 8px; padding: 13px 12px 13px 14px; border-bottom: 1px solid var(--line); min-height: 56px; }
 .deck-row:last-child { border-bottom: 0; }
 .deck-row:active { background: var(--bg3); }
+.deck-list { position: relative; }
+.deck-row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; background: var(--bg2); }
+.deck-row.dragging { position: relative; z-index: 3; background: var(--bg2); box-shadow: 0 8px 24px rgba(0,0,0,.25); transition: none; }
+.drop-line { position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 2px; background: var(--accent); z-index: 4; pointer-events: none; }
+.center { text-align: center; }
 .deck-name { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .deck-toggle { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); margin-left: -6px; transition: transform .15s; }
 .deck-toggle.closed { transform: rotate(-90deg); }

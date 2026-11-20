@@ -1,7 +1,7 @@
 // Import Anki packages (.apkg/.colpkg, old and new formats), text/CSV (Anki/Quizlet exports) and app backups.
 import { unzipSync, strFromU8 } from 'fflate';
 import { decompress as zstd } from 'fzstd';
-import { S, put, putMany, putMediaMany, ensureDeck, notetypeByName, setKV, wipeAll, load } from './store.js';
+import { S, put, putMany, putMediaMany, ensureDeck, notetypeByName, setKV, wipeAll, load, natural } from './store.js';
 import { fromAnki, emptyState } from './sched.js';
 import { ordsToGenerate } from './templates.js';
 import { guid } from './notes.js';
@@ -172,7 +172,8 @@ export async function commit(pkg, { keepProgress = true, reversed = false, deckN
   }
   // decks
   const deckMap = new Map();
-  for (const did of new Set(pkg.cards.map(c => c.did))) deckMap.set(did, (await ensureDeck(pkg.decks[did] || 'Default')).id);
+  const dids = [...new Set(pkg.cards.map(c => c.did))].sort((a, b) => natural(pkg.decks[a] || 'Default', pkg.decks[b] || 'Default'));
+  for (const did of dids) deckMap.set(did, (await ensureDeck(pkg.decks[did] || 'Default')).id);
   onProgress(0.1, 'Adding notes…');
 
   // notes (update existing ones with the same guid instead of duplicating)

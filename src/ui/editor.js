@@ -1,5 +1,5 @@
 // Add / edit notes.
-import { S, putMedia, mediaUrl, ensureDeck, setKV, deckName, notetypeByName } from '../store.js';
+import { S, putMedia, mediaUrl, ensureDeck, setKV, deckName, notetypeByName, deckTreeOrder } from '../store.js';
 import { createNote, updateNote, deleteNotes } from '../notes.js';
 import { ordsToGenerate, clozeNumbers, deferImgs } from '../templates.js';
 import { h, header, pushScreen, popScreen, icon, toast, confirmBox, promptBox, esc, stripHtml } from '../util.js';
@@ -20,7 +20,7 @@ export function openEditor({ note, deckId, ntId, onSave } = {}) {
 
   function deckSelect() {
     const sel = h('select.input', { on: { change: async e => { if (e.target.value === '__new') { const n = await promptBox('New deck name', '', { ok: 'Create' }); if (n) { deck = (await ensureDeck(n)).id; } render(); } else deck = +e.target.value; } } },
-      [...S.decks.values()].sort((a, b) => a.name.localeCompare(b.name)).map(d => h('option', { value: d.id, selected: d.id === deck }, d.name.replace(/::/g, ' › '))),
+      deckTreeOrder().map(([d]) => h('option', { value: d.id, selected: d.id === deck }, d.name.replace(/::/g, ' › '))),
       h('option', { value: '__new' }, '+ New deck…'));
     return sel;
   }

@@ -1,5 +1,5 @@
 // Decks tab, deck page, deck options, import flow.
-import { S, put, del, subtree, deckConf, setKV, ensureDeck, deckByName, notetypeByName } from '../store.js';
+import { S, put, putMany, del, subtree, deckConf, setKV, ensureDeck, deckByName, notetypeByName, deckChildren, saveSettings } from '../store.js';
 import { counts, deckCards, streak, State, dayStartMs } from '../sched.js';
 import { parseFile, commit } from '../importer.js';
 import { exportApkg } from '../exporter.js';
@@ -30,25 +30,89 @@ export function renderDecks() {
       h('div', h('b', due), h('span', 'cards to study today')),
       h('div', h('b', studiedToday), h('span', 'studied today')),
       h('div', h('b', '🔥 ' + streak()), h('span', 'day streak'))) : null,
-    hasCards ? h('div.group', top.map(d => deckRows(d, 0, cs))) : emptyState(),
+    hasCards ? h('div.group.deck-list', top.map(d => deckRows(d, 0, cs))) : emptyState(),
+    hasCards ? h('p.muted.small.center', { style: { marginTop: '12px' } }, 'Press and hold a deck to move it') : null,
   );
   t.scrollTop = scroll;
+  const list = t.querySelector('.deck-list'); if (list) enableReorder(list);
 }
+
+// ── press-and-hold to reorder decks among their siblings ──
+let suppressClick = false;
+function enableReorder(list) {
+  let press = null, drag = null;
+  const rowsOf = () => [...list.querySelectorAll('.deck-row')];
+  // a deck's "block" = its row plus the rows of its visible subdecks
+  const block = row => { const rows = rowsOf(); const i = rows.indexOf(row); const d = +row.dataset.depth; const out = [row]; for (let k = i + 1; k < rows.length && +rows[k].dataset.depth > d; k++) out.push(rows[k]); return out; };
+  const cancelPress = () => { if (press) { clearTimeout(press.timer); press = null; } };
+  list.addEventListener('contextmenu', e => { if (e.target.closest('.deck-row')) e.preventDefault(); });
+  list.addEventListener('pointerdown', e => {
+    const row = e.target.closest('.deck-row'); if (!row || e.target.closest('.deck-toggle') || e.button > 0) return;
+    press = { row, x: e.clientX, y: e.clientY, id: e.pointerId, timer: setTimeout(() => begin(e.pointerId), 420) };
+  });
+  function begin(pointerId) {
+    const row = press.row; const y0 = press.y; press = null;
+    const siblings = rowsOf().filter(r => r.dataset.parent === row.dataset.parent && r.dataset.depth === row.dataset.depth);
+    if (siblings.length < 2) { toast('Nothing to reorder here'); return; }
+    try { row.setPointerCapture(pointerId); } catch { }
+    const mine = block(row);
+    mine.forEach(r => r.classList.add('dragging'));
+    const line = h('div.drop-line'); list.appendChild(line);
+    drag = { row, y0, mine, siblings, line, target: siblings.indexOf(row) };
+    suppressClick = true;
+  }
+  list.addEventListener('pointermove', e => {
+    if (press) { if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress(); return; }
+    if (!drag) return;
+    const dy = e.clientY - drag.y0;
+    drag.mine.forEach(r => { r.style.transform = `translateY(${dy}px)`; });
+    // where would it go? compare with the middle of each other sibling's block
+    const others = drag.siblings.filter(s => s !== drag.row);
+    const lr = list.getBoundingClientRect();
+    let idx = others.length, lineY;
+    for (let k = 0; k < others.length; k++) {
+      const b = block(others[k]); const top = b[0].getBoundingClientRect().top, bottom = b[b.length - 1].getBoundingClientRect().bottom;
+      if (e.clientY < (top + bottom) / 2) { idx = k; lineY = top; break; }
+      lineY = bottom;
+    }
+    drag.target = idx;
+    drag.line.style.top = (lineY - lr.top - 1) + 'px';
+  });
+  const end = async () => {
+    cancelPress();
+    if (!drag) { setTimeout(() => { suppressClick = false; }, 0); return; }
+    const { row, siblings, target } = drag; drag = null;
+    const ids = siblings.filter(s => s !== row).map(s => +s.dataset.id);
+    ids.splice(target, 0, +row.dataset.id);
+    const switched = S.settings.deckSort !== 'custom';
+    // keep the current order for all siblings (including hidden ones), then apply the move
+    const decks = ids.map((id, i) => Object.assign(S.decks.get(id), { order: i }));
+    await putMany('decks', decks);
+    if (switched) { S.settings.deckSort = 'custom'; await saveSettings(); }
+    setTimeout(() => { suppressClick = false; }, 0);
+    renderDecks();
+    if (switched) toast('Deck order set to Custom. Change it in Settings');
+  };
+  list.addEventListener('pointerup', end); list.addEventListener('pointercancel', end);
+}
+// stop the page from scrolling while a deck is being dragged
+document.addEventListener('touchmove', e => { if (document.querySelector('.deck-row.dragging')) e.preventDefault(); }, { passive: false });
 
 function topLevel() {
   const all = [...S.decks.values()];
-  const tops = all.filter(d => !d.name.includes('::')).sort((a, b) => a.name.localeCompare(b.name));
+  const tops = deckChildren(null);
   // hide an empty Default deck when there are others
   return tops.filter(d => !(d.id === 1 && tops.length > 1 && !deckCards(1).cards.length));
 }
-const children = d => [...S.decks.values()].filter(x => x.name.startsWith(d.name + '::') && !x.name.slice(d.name.length + 2).includes('::')).sort((a, b) => a.name.localeCompare(b.name));
+const children = d => deckChildren(d);
 
 function deckRows(d, depth, cs) {
   const kids = children(d);
   const collapsed = (S.kv.collapsed || []).includes(d.id);
   const c = cs.get(d.id);
   const num = (v, k) => h('span.' + (v ? k : 'z'), v);
-  const row = h('div.deck-row', { style: { paddingLeft: 14 + depth * 18 + 'px' }, on: { click: () => openDeck(d.id) } },
+  const parent = d.name.includes('::') ? d.name.slice(0, d.name.lastIndexOf('::')) : '';
+  const row = h('div.deck-row', { 'data-id': d.id, 'data-depth': depth, 'data-parent': parent, style: { paddingLeft: 14 + depth * 18 + 'px' }, on: { click: () => { if (!suppressClick) openDeck(d.id); } } },
     kids.length ? h('button.deck-toggle' + (collapsed ? '.closed' : ''), { on: { click: e => { e.stopPropagation(); toggle(d.id); } } }, icon('down', 18)) : null,
     h('div.deck-name', d.name.split('::').pop()),
     h('div.counts', num(c.nw, 'n'), num(c.learn, 'l'), num(c.due, 'd')));

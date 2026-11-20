@@ -29,7 +29,7 @@ export const S = {
   cardsByNote: new Map(), mediaNames: new Set(), settings: null, kv: {},
 };
 
-export const DEFAULT_SETTINGS = { retention: 0.9, dayStart: 4, newPerDay: 20, revPerDay: 200, theme: 'auto', ttsRate: 1, showIntervals: true, offline: false };
+export const DEFAULT_SETTINGS = { retention: 0.9, dayStart: 4, newPerDay: 20, revPerDay: 200, theme: 'auto', ttsRate: 1, showIntervals: true, offline: false, deckSort: 'added' };
 
 export async function load() {
   const d = await open();
@@ -117,6 +117,28 @@ export async function wipeAll() {
 }
 
 // ── decks ──
+// ── deck ordering ──
+// "natural" compare: 1, 2, 10 instead of 1, 10, 2
+export const natural = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
+const leaf = d => d.name.split('::').pop();
+export function sortSiblings(list) {
+  const mode = S.settings.deckSort || 'added';
+  const added = (a, b) => (a.created || a.id) - (b.created || b.id) || a.id - b.id;
+  if (mode === 'name') return list.sort((a, b) => natural(leaf(a), leaf(b)));
+  if (mode === 'custom') return list.sort((a, b) => (a.order ?? 1e15) - (b.order ?? 1e15) || added(a, b));
+  return list.sort(added);
+}
+// direct children of a deck (or top-level decks when parent is null), in display order
+export function deckChildren(parent) {
+  const pre = parent ? parent.name + '::' : '';
+  return sortSiblings([...S.decks.values()].filter(x => x.name.startsWith(pre) && x.name.length > pre.length && !x.name.slice(pre.length).includes('::')));
+}
+// every deck in tree order (for pickers)
+export function deckTreeOrder() {
+  const out = []; const walk = (p, depth) => { for (const d of deckChildren(p)) { out.push([d, depth]); walk(d, depth + 1); } };
+  walk(null, 0); return out;
+}
+
 export const deckName = id => S.decks.get(id)?.name ?? 'Default';
 export function deckByName(name) { for (const d of S.decks.values()) if (d.name.toLowerCase() === name.toLowerCase()) return d; return null; }
 export async function ensureDeck(name) {

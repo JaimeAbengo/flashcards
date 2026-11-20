@@ -1,5 +1,5 @@
 // Browse/search cards, edit, bulk actions.
-import { S, put, putMany, subtree, ensureDeck } from '../store.js';
+import { S, put, putMany, subtree, ensureDeck, deckTreeOrder } from '../store.js';
 import { stateLabel, State, emptyState } from '../sched.js';
 import { cardTexts } from '../templates.js';
 import { deleteNotes } from '../notes.js';
@@ -40,7 +40,7 @@ function browseView(root, { deckId, inScreen }) {
   const search = h('input', { type: 'search', placeholder: 'Search cards and tags', value: st.q, autocapitalize: 'off', autocorrect: 'off', on: { input: e => { st.q = e.target.value; st.limit = 100; draw(); } } });
   const deckSel = h('select', { on: { change: e => { st.deck = e.target.value === 'all' ? 'all' : +e.target.value; st.limit = 100; draw(); } } },
     h('option', { value: 'all' }, 'All decks'),
-    [...S.decks.values()].sort((a, b) => a.name.localeCompare(b.name)).map(d => h('option', { value: d.id, selected: d.id === st.deck }, d.name.replace(/::/g, ' › '))));
+    deckTreeOrder().map(([d]) => h('option', { value: d.id, selected: d.id === st.deck }, d.name.replace(/::/g, ' › '))));
   const stateSel = h('select', { on: { change: e => { st.state = e.target.value; st.limit = 100; draw(); } } },
     [['all', 'Any state'], ['new', 'New'], ['learning', 'Learning'], ['due', 'Due today'], ['review', 'Review'], ['suspended', 'Suspended'], ['hard', 'Hardest (lapses)']].map(([v, l]) => h('option', { value: v, selected: v === st.state }, l)));
   const selBtn = h('button.link', { on: { click: () => { st.selecting = !st.selecting; st.sel.clear(); draw(); } } });
@@ -104,7 +104,7 @@ function browseView(root, { deckId, inScreen }) {
   }
   const selected = () => [...st.sel].map(id => S.cards.get(id)).filter(Boolean);
   async function move() {
-    const sel = h('select.input', [...S.decks.values()].sort((a, b) => a.name.localeCompare(b.name)).map(d => h('option', { value: d.id }, d.name.replace(/::/g, ' › '))));
+    const sel = h('select.input', deckTreeOrder().map(([d]) => h('option', { value: d.id }, d.name.replace(/::/g, ' › '))));
     const r = await modal({ title: `Move ${plural(st.sel.size, 'card')} to`, body: sel, actions: [{ label: 'Cancel', value: null }, { label: 'Move', value: 'ok', primary: true }] });
     if (r !== 'ok') return;
     const cs = selected(); cs.forEach(c => { c.deckId = +sel.value; }); await putMany('cards', cs);
