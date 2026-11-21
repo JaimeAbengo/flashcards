@@ -3,7 +3,7 @@ import { S, saveSettings, wipeAll, load } from '../store.js';
 import { exportBackup, exportApkg } from '../exporter.js';
 import { h, toast, confirmBox, downloadFile, plural } from '../util.js';
 import { startImport } from './decks.js';
-import { applyTheme, refreshAll, VERSION, syncOfflineFlag, appCached } from './app.js';
+import { applyTheme, refreshAll, VERSION, syncOfflineFlag, appCached, checkForUpdates } from './app.js';
 
 export async function renderSettings() {
   const t = document.getElementById('tab-settings');
@@ -58,7 +58,8 @@ async function toggleOffline(e) {
     return toast("The app isn't fully saved on this phone yet. Open it once with internet, then try again.", 4000);
   }
   S.settings.offline = on; await saveSettings(); await syncOfflineFlag();
-  toast(on ? 'Offline mode on: the app will not connect to the internet' : 'Offline mode off');
+  if (on) document.getElementById('updateBar').hidden = true; else checkForUpdates();
+  toast(on ? 'Offline mode on: the app will not connect to the internet' : 'Offline mode off. Checking for updates…');
   renderSettings();
 }
 

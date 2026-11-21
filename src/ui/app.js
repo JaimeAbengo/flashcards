@@ -57,11 +57,15 @@ export async function appCached() {
   } catch { return false; }
 }
 
+let swReg = null;
+// look for an app update now (used when Offline mode is switched off)
+export function checkForUpdates() { if (swReg && !S.settings.offline) swReg.update().catch(() => { }); }
+
 async function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    const reg = await navigator.serviceWorker.register('sw.js');
-    const prompt = w => { $('#updateBar').hidden = false; $('#updateBtn').onclick = () => w.postMessage('skipWaiting'); };
+    const reg = swReg = await navigator.serviceWorker.register('sw.js');
+    const prompt = w => { if (S.settings.offline) return; $('#updateBar').hidden = false; $('#updateBtn').onclick = () => w.postMessage('skipWaiting'); };
     if (reg.waiting && navigator.serviceWorker.controller) prompt(reg.waiting);
     reg.addEventListener('updatefound', () => { const w = reg.installing; w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) prompt(w); }); });
     let reloading = false;
