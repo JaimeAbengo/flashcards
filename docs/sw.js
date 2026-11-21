@@ -1,4 +1,4 @@
-const VERSION = '2026.11.20-1934';
+const VERSION = '2026.11.21-2339';
 const SHELL = 'shell-' + VERSION;
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'vendor/sql-wasm.wasm', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' }))))); });

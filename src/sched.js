@@ -1,7 +1,7 @@
 // FSRS scheduling, daily limits, queues.
 import { fsrs, createEmptyCard, Rating, generatorParameters, State } from 'ts-fsrs';
 import { S, put, del, subtree, deckConf, setKV } from './store.js';
-import { DAY } from './util.js';
+import { DAY, newId } from './util.js';
 
 export { Rating, State };
 let F, Fret;
@@ -31,20 +31,23 @@ export function preview(card, now = new Date()) {
   return { 1: +r[Rating.Again].card.due - +now, 2: +r[Rating.Hard].card.due - +now, 3: +r[Rating.Good].card.due - +now, 4: +r[Rating.Easy].card.due - +now };
 }
 
-export async function answer(card, rating, ms = 0) {
+// Grades a card. The new schedule takes effect immediately (in memory); saving to the phone's
+// database happens in the background (`saved`), so the screen never waits on storage.
+export function answer(card, rating, ms = 0) {
   const now = new Date();
   const before = { ...card.s };
   const { card: next } = engine().next(toFsrs(card.s), now, rating);
   card.s = toStore(next); card.mod = Date.now();
-  const log = { id: Date.now(), cid: card.id, r: rating, st: before.state, ivl: Math.round((card.s.due - +now) / 6e4), ms };
-  await put('cards', card); await put('revlog', log);
+  const log = { id: newId(), cid: card.id, r: rating, st: before.state, ivl: Math.round((card.s.due - +now) / 6e4), ms };
+  const saved = Promise.all([put('cards', card), put('revlog', log)]);
   unboost(card.id);
-  return { card, before, log };
+  return { card, before, log, saved };
 }
-export async function undoAnswer(u) {
-  u.card.s = u.before; await put('cards', u.card);
+export function undoAnswer(u) {
+  u.card.s = u.before;
   const i = S.revlog.findIndex(x => x.id === u.log.id); if (i >= 0) S.revlog.splice(i, 1);
-  await del('revlog', u.log.id);
+  // wait for the original save first, so the undo can't be overwritten by it
+  return (async () => { await u.saved.catch(() => { }); await put('cards', u.card); await del('revlog', u.log.id); })();
 }
 export async function resetCard(card) { card.s = emptyState(); card.pos = Date.now(); await put('cards', card); }
 export async function setDueNow(card) { card.s = { ...card.s, due: Date.now() }; await put('cards', card); }

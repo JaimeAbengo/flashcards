@@ -30,12 +30,14 @@ const DARK = `
 .ta-good { background: #174d2c; color: #b6f0c9; } .ta-bad { background: #5a1d14; color: #ffc5bb; } .ta-miss { background: #33333d; color: #ccc; }
 `;
 
-export async function mountCard(host, html, css, { onEnter, ttsLang } = {}) {
+// Draws the card immediately (no waiting on storage). Images and fonts stored in the app fill in a moment later.
+// `alive()` lets the caller cancel that late fill-in if another card has been shown since.
+export function mountCard(host, html, css, { onEnter, ttsLang, alive = () => true } = {}) {
   const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
   const dark = isDark();
   const clean = deferImgs(String(html).replace(/<script[\s\S]*?<\/script>/gi, ''));
-  root.innerHTML = `<style>${BASE}${await cssWithMedia(css || '')}${dark ? DARK : ''}</style><div class="card${dark ? ' nightMode night_mode' : ''}">${soundify(clean)}</div>`;
-  await hydrate(root);
+  const baseCss = String(css || '').replace(/@import[^;]+;/g, '');
+  root.innerHTML = `<style>${BASE}${baseCss}${dark ? DARK : ''}</style><div class="card${dark ? ' nightMode night_mode' : ''}">${soundify(clean)}</div>`;
   root.querySelectorAll('.snd-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); playSound(b.dataset.snd); }));
   root.querySelectorAll('a[href]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
@@ -52,6 +54,16 @@ export async function mountCard(host, html, css, { onEnter, ttsLang } = {}) {
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onEnter && onEnter(); } });
     slot.replaceWith(input);
   }
-  return { root, input, sounds: soundsIn(soundify(clean)) };
+  // late fill-in: stored images, and fonts/backgrounds the deck's style refers to
+  const ready = (async () => {
+    try {
+      await hydrate(root);
+      if (/url\(/i.test(baseCss)) {
+        const full = await cssWithMedia(baseCss);
+        if (alive()) { const st = root.querySelector('style'); if (st) st.textContent = BASE + full + (dark ? DARK : ''); }
+      }
+    } catch (e) { console.error(e); }
+  })();
+  return { root, input, sounds: soundsIn(soundify(clean)), ready };
 }
 export function autoplay(sounds) { if (sounds[0]) playSound(sounds[0]); }

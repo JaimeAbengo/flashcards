@@ -12,19 +12,25 @@ import { put } from '../store.js';
 export function openStudy(deckId, { onClose } = {}) {
   const q = buildQueue(deckId);
   const conf = deckConf(deckId);
-  let card = null, shown = false, started = 0, mounted = null, reviewed = 0;
+  // phase: 'question' (Show answer visible), 'answer' (rating buttons visible) or 'idle'
+  let card = null, phase = 'idle', started = 0, revealedAt = 0, reviewed = 0, seq = 0;
   const undos = [];
 
   const countsEl = h('div.study-counts');
   const undoBtn = h('button.icon-btn', { 'aria-label': 'Undo', on: { click: undo } }, icon('undo'));
   const menuBtn = h('button.icon-btn', { 'aria-label': 'More', on: { click: menu } }, icon('more'));
-  const host = h('div.card-host', { on: { click: e => { if (!shown && card && !e.composedPath().some(el => el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.tagName === 'SUMMARY')) reveal(); } } });
+  const host = h('div.card-host', { on: { click: e => { if (phase === 'question' && !e.composedPath().some(el => el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.tagName === 'SUMMARY' || el.tagName === 'A')) reveal(); } } });
   const area = h('div.card-area', host);
+  // The buttons are created once and reused, so a tap is never lost to a button being rebuilt.
+  const showBtn = h('button.btn.primary.big.wide', { on: { click: reveal } }, 'Show answer');
+  const LABELS = ['', 'Again', 'Hard', 'Good', 'Easy'];
+  const rateBtns = [1, 2, 3, 4].map(r => h(`button.r${r}`, { on: { click: () => rate(r) } }, h('small'), h('span', LABELS[r])));
+  const rateRow = h('div.rate', rateBtns);
   const bar = h('div.answer-bar');
   const el = h('div.study',
     header(countsEl, { right: [undoBtn, menuBtn], onBack: close }),
     area, bar);
-  pushScreen(el, { onClose: () => { stopSound(); stopSpeaking(); document.removeEventListener('keydown', keys); onClose && onClose(); } });
+  pushScreen(el, { onClose: () => { seq++; stopSound(); stopSpeaking(); document.removeEventListener('keydown', keys); onClose && onClose(); } });
   document.addEventListener('keydown', keys);
   function close() { popScreen(el); }
 
@@ -41,61 +47,79 @@ export function openStudy(deckId, { onClose } = {}) {
     menuBtn.hidden = !card;
   }
 
-  async function showNext() {
+  // draw a card side right away; `after` runs once its images are in (skipped if another card came first)
+  function draw(html, css, ttsLang, after) {
+    const my = ++seq;
+    let m;
+    try { m = mountCard(host, html, css, { onEnter: reveal, ttsLang, alive: () => my === seq }); }
+    catch (e) { console.error(e); host.shadowRoot && (host.shadowRoot.innerHTML = '<div style="padding:24px;text-align:center">This card could not be displayed.</div>'); return null; }
+    m.ready.then(() => { if (my === seq && after) after(m); });
+    return m;
+  }
+
+  // show a card's question
+  function showCard(c) {
     stopSound(); stopSpeaking();
-    const nx = nextCard(q, { exclude: undefined });
+    card = c; phase = 'question'; started = Date.now();
+    if (!host.isConnected) area.replaceChildren(host);
+    renderCounts();
+    bar.replaceChildren(showBtn);
+    const { q: qh, css } = renderQA(card);
+    const m = draw(qh, css, conf.ttsFront, m => {
+      if (m.sounds.length) autoplay(m.sounds);
+      else if (conf.ttsAuto && conf.ttsFront) speak(stripHtml(qh), conf.ttsFront);
+    });
+    area.scrollTop = 0;
+    if (m && m.input) setTimeout(() => { if (phase === 'question' && card === c) m.input.focus(); }, 250);
+  }
+
+  function showNext() {
+    const nx = nextCard(q);
     if (!nx) return finished();
     if (nx.wait) return waiting(nx.wait);
-    card = nx; shown = false; started = Date.now();
-    renderCounts();
-    const { q: qh, css } = renderQA(card);
-    mounted = await mountCard(host, qh, css, { onEnter: reveal, ttsLang: conf.ttsFront });
-    area.scrollTop = 0;
-    bar.replaceChildren(h('button.btn.primary.big.wide', { on: { click: reveal } }, 'Show answer'));
-    if (mounted.sounds.length) autoplay(mounted.sounds);
-    else if (conf.ttsAuto && conf.ttsFront) speak(stripHtml(qh), conf.ttsFront);
-    if (mounted.input) setTimeout(() => mounted.input.focus(), 250);
+    showCard(nx);
   }
 
-  async function reveal() {
-    if (!card || shown) return;
-    shown = true;
-    const typed = mounted?.input?.value;
+  function reveal() {
+    if (!card || phase !== 'question') return;
+    phase = 'answer'; revealedAt = performance.now();
+    stopSound();
+    const typed = host.shadowRoot?.querySelector('.typeans-input')?.value;
+    let p = null;
+    try { p = preview(card); } catch (e) { console.error(e); }
+    rateBtns.forEach((b, i) => { const sm = b.firstChild; sm.textContent = p && S.settings.showIntervals ? fmtInterval(p[i + 1]) : ''; sm.hidden = !sm.textContent; });
+    bar.replaceChildren(rateRow);
+    const qs = renderQA(card).q;
     const { a, css } = renderQA(card, { typed });
-    mounted = await mountCard(host, a, css, { ttsLang: conf.ttsBack });
-    const p = preview(card);
-    const lbl = ['', 'Again', 'Hard', 'Good', 'Easy'];
-    bar.replaceChildren(h('div.rate', [1, 2, 3, 4].map(r => h(`button.r${r}`, { on: { click: () => rate(r) } },
-      S.settings.showIntervals ? h('small', fmtInterval(p[r])) : null, lbl[r]))));
-    if (mounted.sounds.length) { const qs = renderQA(card).q; const newOnes = mounted.sounds.filter(s => !qs.includes(s)); autoplay(newOnes.length ? newOnes : []); }
-    else if (conf.ttsAuto && conf.ttsBack) { const t = stripHtml(a.split(/<hr id=answer>/i).pop()); speak(t, conf.ttsBack); }
+    draw(a, css, conf.ttsBack, m => {
+      if (m.sounds.length) { const newOnes = m.sounds.filter(s => !qs.includes(s)); autoplay(newOnes); }
+      else if (conf.ttsAuto && conf.ttsBack) speak(stripHtml(a.split(/<hr id=answer>/i).pop()), conf.ttsBack);
+    });
   }
 
-  async function rate(r) {
-    if (!card || !shown) return;
-    const c = card; card = null;
-    const u = await answer(c, r, Math.min(60000, Date.now() - started));
+  function rate(r) {
+    if (!card || phase !== 'answer') return;
+    // a double-tap on "Show answer" shouldn't also grade the card
+    if (performance.now() - revealedAt < 180) return;
+    const c = card;
+    let u;
+    try { u = answer(c, r, Math.min(60000, Date.now() - started)); }
+    catch (e) { console.error(e); toast("Couldn't grade this card: " + (e.message || e)); return; }
+    u.saved.catch(e => { console.error(e); toast("Couldn't save your last answer. Is the phone's storage full?"); });
     undos.push(u); reviewed++;
     removeFromQueue(q, c);
     showNext();
   }
 
-  async function undo() {
+  function undo() {
     const u = undos.pop(); if (!u) return;
-    await undoAnswer(u); reviewed--;
-    // put the card back into the right queue
+    undoAnswer(u).catch(e => { console.error(e); toast("Couldn't save the undo"); });
+    reviewed--;
+    // put the card back into the right queue and show it again
     for (const k of ['learn', 'review', 'fresh']) { const i = q[k].indexOf(u.card); if (i >= 0) q[k].splice(i, 1); }
     const st = u.card.s.state;
     (st === State.New ? q.fresh : st === State.Review ? q.review : q.learn).unshift(u.card);
-    card = null;
-    const show = u.card;
-    // show the undone card immediately
-    stopSound();
-    if (!host.isConnected) area.replaceChildren(host);
-    card = show; shown = false; started = Date.now(); renderCounts();
-    const { q: qh, css } = renderQA(card);
-    mounted = await mountCard(host, qh, css, { onEnter: reveal, ttsLang: conf.ttsFront });
-    bar.replaceChildren(h('button.btn.primary.big.wide', { on: { click: reveal } }, 'Show answer'));
+    showCard(u.card);
     toast('Undone');
   }
 
@@ -111,21 +135,22 @@ export function openStudy(deckId, { onClose } = {}) {
     ]);
     if (v) act(v);
     async function act(v) {
+      const shown = phase === 'answer';
       if (v === 'speak') { const { q: qh, a } = renderQA(c); speak(stripHtml(shown ? a.split(/<hr id=answer>/i).pop() : qh), shown ? conf.ttsBack : conf.ttsFront); }
-      if (v === 'edit') openEditor({ note, onSave: async () => { if (card === c) { shown = false; const { q: qh, css } = renderQA(c); mounted = await mountCard(host, qh, css, { onEnter: reveal }); bar.replaceChildren(h('button.btn.primary.big.wide', { on: { click: reveal } }, 'Show answer')); } } });
-      if (v === 'suspend') { c.susp = true; await put('cards', c); removeFromQueue(q, c); for (const k of ['learn']) { const i = q[k].indexOf(c); if (i >= 0) q[k].splice(i, 1); } toast('Card suspended'); card = null; showNext(); }
+      if (v === 'edit') openEditor({ note, onSave: () => { if (card === c && S.cards.has(c.id)) showCard(c); } });
+      if (v === 'suspend') { c.susp = true; put('cards', c).catch(e => console.error(e)); removeFromQueue(q, c); const i = q.learn.indexOf(c); if (i >= 0) q.learn.splice(i, 1); toast('Card suspended'); showNext(); }
       if (v === 'delete') {
         if (!(await confirmBox('Delete this note and all its cards?', { ok: 'Delete', danger: true }))) return;
         const ids = S.cardsByNote.get(c.noteId) || [];
         await deleteNotes([c.noteId]);
         for (const k of ['learn', 'review', 'fresh']) q[k] = q[k].filter(x => !ids.includes(x.id));
-        toast('Note deleted'); card = null; showNext();
+        toast('Note deleted'); showNext();
       }
     }
   }
 
   function finished() {
-    card = null; renderCounts();
+    card = null; phase = 'idle'; seq++; renderCounts();
     area.replaceChildren(h('div.study-done',
       h('div.emoji', '🎉'), h('h2', 'Done for now!'),
       h('p.muted', reviewed ? `You studied ${plural(reviewed, 'card')} this session.` : 'Nothing is due in this deck right now.'),
@@ -133,19 +158,19 @@ export function openStudy(deckId, { onClose } = {}) {
     bar.replaceChildren(h('button.btn.primary.big.wide', { on: { click: close } }, 'Back to deck'));
   }
   function waiting(t) {
-    card = null; renderCounts();
+    card = null; phase = 'idle'; seq++; renderCounts();
     const mins = Math.max(1, Math.round((t - Date.now()) / 6e4));
     area.replaceChildren(h('div.study-done', h('div.emoji', '⏳'), h('h2', 'Taking a short break'),
       h('p.muted', `Your next learning card is due in ${mins} minute${mins > 1 ? 's' : ''}.`)));
     bar.replaceChildren(h('div.btn-row', h('button.btn.big', { on: { click: close } }, 'Back'),
-      h('button.btn.primary.big', { on: { click: () => { const c = q.learn.sort((a, b) => a.s.due - b.s.due)[0]; if (c) { c.s.due = Date.now(); } area.replaceChildren(host); showNext(); } } }, 'Study it now')));
+      h('button.btn.primary.big', { on: { click: () => { const c = q.learn.sort((a, b) => a.s.due - b.s.due)[0]; if (c) { c.s.due = Date.now(); } showNext(); } } }, 'Study it now')));
   }
 
   function keys(e) {
     if (!el.isConnected || document.querySelector('.modal-wrap') || e.target.tagName === 'INPUT' && e.key !== 'Enter') return;
-    if (!shown && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); reveal(); }
-    else if (shown && ['1', '2', '3', '4'].includes(e.key)) rate(+e.key);
-    else if (shown && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); rate(3); }
+    if (phase === 'question' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); reveal(); }
+    else if (phase === 'answer' && ['1', '2', '3', '4'].includes(e.key)) rate(+e.key);
+    else if (phase === 'answer' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); rate(3); }
     else if (e.key === 'z' && (e.metaKey || e.ctrlKey)) undo();
   }
 
