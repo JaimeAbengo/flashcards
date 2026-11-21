@@ -70,6 +70,17 @@ async function registerSW() {
   } catch { }
 }
 
+// iOS bug workaround: after the on-screen keyboard closes, the page can stay scrolled/shifted by a few dozen pixels,
+// and taps then land above or below what's drawn. Snap it back whenever the keyboard goes away.
+function resetViewport() {
+  if (window.scrollY || window.scrollX || document.documentElement.scrollTop || document.body.scrollTop) {
+    window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
+  }
+}
+document.addEventListener('focusout', () => { setTimeout(resetViewport, 60); setTimeout(resetViewport, 350); });
+window.visualViewport?.addEventListener('resize', () => { if (window.visualViewport.height >= window.innerHeight - 2) resetViewport(); });
+window.addEventListener('scroll', () => { if (!document.activeElement || !/INPUT|TEXTAREA/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) resetViewport(); }, { passive: true });
+
 export async function boot() {
   window.addEventListener('error', e => { console.error(e.error || e.message); });
   window.addEventListener('unhandledrejection', e => { console.error(e.reason); toast('Something went wrong: ' + (e.reason?.message || e.reason)); });
@@ -79,6 +90,6 @@ export async function boot() {
   $('#tabbar').replaceChildren(...TABS.map(t => h('button', { 'data-tab': t.id, on: { click: () => showTab(t.id) } }, icon(t.icon), t.label)));
   showTab('decks');
   // refresh counts when coming back to the app (e.g. the next morning)
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshAll(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { resetViewport(); refreshAll(); } });
   registerSW();
 }

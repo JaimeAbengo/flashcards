@@ -108,7 +108,7 @@ export function modal({ title, body, actions = [], cls = '' }) {
       h('div.modal',
         title && h('div.modal-title', title),
         body && h('div.modal-body', typeof body === 'function' ? body(close) : body),
-        actions.length && h('div.modal-actions', actions.map(a => h('button.btn' + (a.primary ? '.primary' : '') + (a.danger ? '.danger' : ''), { on: { click: () => close(a.value) } }, a.label)))));
+        actions.length ? h('div.modal-actions', actions.map(a => h('button.btn' + (a.primary ? '.primary' : '') + (a.danger ? '.danger' : ''), { on: { click: () => close(a.value) } }, a.label))) : null));
     document.body.appendChild(wrap);
     const first = wrap.querySelector('input,select,textarea'); if (first) setTimeout(() => first.focus(), 50);
     wrap.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') { const p = actions.find(a => a.primary); if (p) close(p.value); } });
